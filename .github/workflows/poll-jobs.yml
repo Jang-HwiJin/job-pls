@@ -2,7 +2,8 @@ name: Poll Job Listings
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # GitHub schedules are UTC. Avoid :00/:30 because those are the busiest minutes.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 concurrency:
