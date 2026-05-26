@@ -236,6 +236,9 @@ export default async function Home() {
                   {latestRun.newJobs} new.
                 </span>
               </div>
+              {latestRun.errors.length > 0 ? (
+                <p className="mt-2 text-xs font-bold">{latestRun.errors[latestRun.errors.length - 1]}</p>
+              ) : null}
               <p className="mt-2 text-xs">This panel refreshes every 3 seconds until the run finishes.</p>
             </div>
           ) : null}

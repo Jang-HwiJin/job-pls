@@ -15,13 +15,13 @@ import { scoreJob } from "@/lib/matcher";
 import { formatTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
 import type { NormalizedJob, PollSummary } from "@/lib/types";
 
-const ALERT_FRESHNESS_WINDOW_MS = 60 * 60 * 1000;
+const FRESH_POSTING_WINDOW_MS = 60 * 60 * 1000;
 
-function isFreshEnoughForAlert(job: NormalizedJob, now = new Date()) {
+function getFreshness(job: NormalizedJob, now = new Date()) {
   if (!job.postedAt) {
     return {
       fresh: false,
-      reason: "No posted timestamp found; skipped Telegram alert because freshness is unknown.",
+      reason: "No posted timestamp found; skipped because freshness is unknown.",
     };
   }
 
@@ -30,16 +30,16 @@ function isFreshEnoughForAlert(job: NormalizedJob, now = new Date()) {
   if (Number.isNaN(postedAt.getTime())) {
     return {
       fresh: false,
-      reason: "Invalid posted timestamp; skipped Telegram alert.",
+      reason: "Invalid posted timestamp; skipped.",
     };
   }
 
   const ageMs = now.getTime() - postedAt.getTime();
 
-  if (ageMs > ALERT_FRESHNESS_WINDOW_MS) {
+  if (ageMs > FRESH_POSTING_WINDOW_MS) {
     return {
       fresh: false,
-      reason: "Posted more than 1 hour ago; skipped Telegram alert.",
+      reason: "Posted more than 1 hour ago; skipped.",
     };
   }
 
@@ -80,13 +80,18 @@ export async function runPollingCycle() {
 
     for (const source of sources) {
       summary.checkedSources += 1;
+      summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
+      summary.skippedSources.push(`Checking ${source.companyName}...`);
+      await updatePollRunProgress(summary);
 
       if (source.provider === "public_page") {
+        summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         summary.skippedSources.push(`${source.companyName}: public page monitor is disabled until compliance is confirmed.`);
         continue;
       }
 
       if (source.provider === "unsupported") {
+        summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         summary.skippedSources.push(`${source.companyName}: no free public source confirmed.`);
         continue;
       }
@@ -94,8 +99,13 @@ export async function runPollingCycle() {
       try {
         const jobs = await fetchJobsForSource(source);
         summary.fetchedJobs += jobs.length;
+        const freshJobs = jobs.filter((job) => getFreshness(job).fresh);
 
-        for (const job of jobs) {
+        if (freshJobs.length < jobs.length) {
+          summary.skippedSources.push(`${source.companyName}: skipped ${jobs.length - freshJobs.length} older posting(s).`);
+        }
+
+        for (const job of freshJobs) {
           const persisted = await upsertJob(job);
           const match = scoreJob(job, preferences);
           await saveMatchResult(persisted.id, match);
@@ -104,13 +114,6 @@ export async function runPollingCycle() {
           if (match.matched) summary.matchedJobs += 1;
 
           if (persisted.isNew && match.matched && !(await hasNotification(persisted.id))) {
-            const freshness = isFreshEnoughForAlert(job);
-
-            if (!freshness.fresh) {
-              await recordNotification(persisted.id, "skipped", freshness.reason ?? "Skipped Telegram alert.");
-              continue;
-            }
-
             const message = formatTelegramMessage(job, match);
             const notification = await sendTelegramMessage(message);
             await recordNotification(persisted.id, notification.sent ? "sent" : "skipped", notification.reason);
@@ -118,8 +121,10 @@ export async function runPollingCycle() {
             if (notification.sent) summary.notifiedJobs += 1;
           }
         }
+        summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         await updatePollRunProgress(summary);
       } catch (error) {
+        summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         summary.errors.push(`${source.companyName}: ${error instanceof Error ? error.message : String(error)}`);
         await updatePollRunProgress(summary);
       }

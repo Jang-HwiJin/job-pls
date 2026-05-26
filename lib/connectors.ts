@@ -42,16 +42,22 @@ function extractSalary(text: string) {
   };
 }
 
+const FETCH_TIMEOUT_MS = 10_000;
+
 async function fetchJson(url: string, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
   const response = await fetch(url, {
     ...init,
+    signal: controller.signal,
     headers: {
       "User-Agent": "job-pls/0.1 (+https://github.com/Jang-HwiJin/job-pls)",
       Accept: "application/json",
       ...init?.headers,
     },
     next: { revalidate: 0 },
-  });
+  }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} from ${url}`);
