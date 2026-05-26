@@ -1,0 +1,24 @@
+name: Poll Job Listings
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: poll-job-listings
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Job Pls poll endpoint
+        run: |
+          curl -sS -X POST "$POLL_URL" \
+            -H "Authorization: Bearer $POLL_SECRET" \
+            -H "Content-Type: application/json" \
+            --fail
+        env:
+          POLL_URL: ${{ secrets.POLL_URL }}
+          POLL_SECRET: ${{ secrets.POLL_SECRET }}
