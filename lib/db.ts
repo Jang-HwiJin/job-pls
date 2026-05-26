@@ -527,6 +527,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     FROM jobs
     LEFT JOIN match_results ON match_results.job_id = jobs.id
     LEFT JOIN notification_history ON notification_history.job_id = jobs.id
+    WHERE jobs.posted_at >= NOW() - INTERVAL '1 hour'
     ORDER BY jobs.first_seen_at DESC
     LIMIT 30
   `);

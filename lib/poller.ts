@@ -13,7 +13,41 @@ import {
 import { fetchJobsForSource } from "@/lib/connectors";
 import { scoreJob } from "@/lib/matcher";
 import { formatTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
-import type { PollSummary } from "@/lib/types";
+import type { NormalizedJob, PollSummary } from "@/lib/types";
+
+const ALERT_FRESHNESS_WINDOW_MS = 60 * 60 * 1000;
+
+function isFreshEnoughForAlert(job: NormalizedJob, now = new Date()) {
+  if (!job.postedAt) {
+    return {
+      fresh: false,
+      reason: "No posted timestamp found; skipped Telegram alert because freshness is unknown.",
+    };
+  }
+
+  const postedAt = new Date(job.postedAt);
+
+  if (Number.isNaN(postedAt.getTime())) {
+    return {
+      fresh: false,
+      reason: "Invalid posted timestamp; skipped Telegram alert.",
+    };
+  }
+
+  const ageMs = now.getTime() - postedAt.getTime();
+
+  if (ageMs > ALERT_FRESHNESS_WINDOW_MS) {
+    return {
+      fresh: false,
+      reason: "Posted more than 1 hour ago; skipped Telegram alert.",
+    };
+  }
+
+  return {
+    fresh: true,
+    reason: null,
+  };
+}
 
 export async function runPollingCycle() {
   const summary: PollSummary = {
@@ -70,6 +104,13 @@ export async function runPollingCycle() {
           if (match.matched) summary.matchedJobs += 1;
 
           if (persisted.isNew && match.matched && !(await hasNotification(persisted.id))) {
+            const freshness = isFreshEnoughForAlert(job);
+
+            if (!freshness.fresh) {
+              await recordNotification(persisted.id, "skipped", freshness.reason ?? "Skipped Telegram alert.");
+              continue;
+            }
+
             const message = formatTelegramMessage(job, match);
             const notification = await sendTelegramMessage(message);
             await recordNotification(persisted.id, notification.sent ? "sent" : "skipped", notification.reason);

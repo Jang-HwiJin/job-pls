@@ -52,6 +52,9 @@ export default async function Home() {
                 Pick the companies you actually care about, tune your fit rules, and let the poller catch new roles
                 before the applicant count turns into a horror movie.
               </p>
+              <p className="mt-3 inline-flex rounded-full bg-[#e7aa35]/20 px-3 py-1 text-sm font-bold text-[#6c4c12]">
+                Telegram alerts only fire for matched postings published within the last hour.
+              </p>
             </div>
 
             <div className="grid gap-3 rounded-[1.5rem] bg-[#17130d] p-4 text-[#fff8ea]">
@@ -163,8 +166,10 @@ export default async function Home() {
             <div className="rounded-[2rem] border border-[#17130d]/10 bg-[#17130d] p-4 text-[#fff8ea] shadow-xl shadow-[#17130d]/20 sm:p-5">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-black tracking-[-0.04em]">Most Recent Matches</h2>
-                  <p className="mt-1 text-sm text-[#d8c8ac]">Posted date matters. First-seen tells us when Job Pls caught it.</p>
+                  <h2 className="text-2xl font-black tracking-[-0.04em]">Fresh Matches</h2>
+                  <p className="mt-1 text-sm text-[#d8c8ac]">
+                    Only jobs posted within the last hour show here. First-seen tells us when Job Pls caught it.
+                  </p>
                 </div>
                 <span className="rounded-full bg-[#fff8ea]/10 px-3 py-1 font-mono text-xs">{data.jobs.length} shown</span>
               </div>
@@ -172,7 +177,7 @@ export default async function Home() {
               <div className="mt-5 grid gap-3">
                 {data.jobs.length === 0 ? (
                   <p className="rounded-2xl border border-[#fff8ea]/10 p-5 text-[#d8c8ac]">
-                    No jobs saved yet. Use <strong>Poll now</strong> after choosing companies.
+                    No fresh matches right now. Use <strong>Poll now</strong> after choosing companies.
                   </p>
                 ) : (
                   data.jobs.map((job) => (
