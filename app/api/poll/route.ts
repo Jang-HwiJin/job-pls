@@ -14,6 +14,6 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const summary = await runPollingCycle();
+  const summary = await runPollingCycle("scheduled");
   return Response.json(summary);
 }

@@ -1,4 +1,4 @@
-import { runPollActionWithState, savePreferencesAction } from "@/app/actions";
+import { runPollActionWithState, savePreferencesAction, togglePageMonitorAction } from "@/app/actions";
 import { CompanyMultiselect } from "@/app/components/company-multiselect";
 import { ActionButton, InteractiveForm } from "@/app/components/interactive-form";
 import { PollLiveRefresh } from "@/app/components/poll-live-refresh";
@@ -26,8 +26,8 @@ function formatDate(value: string | null) {
 export default async function Home() {
   const data = await getDashboardData();
   const alertCompanies = data.companies.filter((company) => company.enabled);
-  const unavailableCompanies = data.companies.filter((company) => !company.enabled);
-  const selectedCompanySlugs = new Set(data.preferences.companySlugs);
+  const pageMonitors = data.companies.filter((company) => company.provider === "page_monitor");
+  const unavailableCompanies = data.companies.filter((company) => !company.enabled && company.provider !== "page_monitor");
   const latestRun = data.pollRuns[0];
   const isPolling = latestRun?.status === "running";
 
@@ -49,7 +49,7 @@ export default async function Home() {
                 Fast alerts, fewer mystery tabs.
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-[#625640]">
-                Pick the companies you actually care about, tune your fit rules, and let the poller catch new roles
+                Tune your fit rules, optionally narrow alerts to specific companies, and let the poller catch fresh roles
                 before the applicant count turns into a horror movie.
               </p>
               <p className="mt-3 inline-flex rounded-full bg-[#e7aa35]/20 px-3 py-1 text-sm font-bold text-[#6c4c12]">
@@ -146,7 +146,7 @@ export default async function Home() {
               </div>
             </PreferenceSection>
 
-            <PreferenceSection title="Alert Companies" subtitle="Searchable multi-select. Selected companies appear as badges." open>
+            <PreferenceSection title="Alert Companies" subtitle="Optional filter. Select companies to narrow alerts, or leave empty to alert on any matching company." open>
               <CompanyMultiselect
                 companies={alertCompanies.map((company) => ({
                   name: company.name,
@@ -159,6 +159,58 @@ export default async function Home() {
             </PreferenceSection>
 
           </InteractiveForm>
+        </section>
+
+        <section className="rounded-[2rem] border border-[#17130d]/10 bg-[#fff8ea]/85 p-5 shadow-xl shadow-[#17130d]/10 backdrop-blur">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-black tracking-[-0.04em]">Page Monitors</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-[#76664e]">
+                Best-effort personal monitors for companies without confirmed public APIs. They use public pages only,
+                skip login walls/private tokens, and should run less often than official API sources.
+              </p>
+            </div>
+            <span className="rounded-full bg-[#17130d]/10 px-3 py-1 font-mono text-xs">
+              {pageMonitors.filter((company) => company.monitorEnabled).length} enabled
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {pageMonitors.map((company) => (
+              <form
+                key={company.slug}
+                action={togglePageMonitorAction}
+                className="grid gap-3 rounded-2xl border border-[#17130d]/10 bg-white/60 p-4"
+              >
+                <input type="hidden" name="companyId" value={company.id ?? ""} />
+                <input type="hidden" name="enabled" value={company.monitorEnabled ? "false" : "true"} />
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-black">{company.name}</p>
+                    <p className="mt-1 font-mono text-xs text-[#76664e]">{company.monitorStrategy ?? "page monitor"}</p>
+                  </div>
+                  <button
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-black transition hover:-translate-y-0.5",
+                      company.monitorEnabled
+                        ? "bg-[#17130d] text-[#fff8ea]"
+                        : "bg-[#e7aa35]/30 text-[#5d4212]",
+                    )}
+                    type="submit"
+                    disabled={!company.id}
+                  >
+                    {company.monitorEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
+                <p className="text-sm text-[#76664e]">{company.monitorNotes ?? company.notes ?? "Public page monitor."}</p>
+                <div className="grid gap-1 rounded-xl bg-[#17130d]/5 p-3 text-xs">
+                  <span>
+                    Status: <strong>{company.monitorLastStatus ?? "not checked"}</strong>
+                  </span>
+                  <span>Last checked: {formatDate(company.monitorLastCheckedAt ?? null)}</span>
+                </div>
+              </form>
+            ))}
+          </div>
         </section>
 
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
@@ -177,7 +229,7 @@ export default async function Home() {
               <div className="mt-5 grid gap-3">
                 {data.jobs.length === 0 ? (
                   <p className="rounded-2xl border border-[#fff8ea]/10 p-5 text-[#d8c8ac]">
-                    No fresh matches right now. Use <strong>Poll now</strong> after choosing companies.
+                    No fresh matches right now. Use <strong>Poll now</strong> after setting your filters.
                   </p>
                 ) : (
                   data.jobs.map((job) => (

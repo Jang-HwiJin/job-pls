@@ -40,7 +40,7 @@ describe("scoreJob", () => {
 
     expect(result.matched).toBe(true);
     expect(result.score).toBeGreaterThanOrEqual(defaultPreferences.matchThreshold);
-    expect(result.reasons.join(" ")).toContain("role keyword");
+    expect(result.reasons.join(" ")).toContain("keyword match");
   });
 
   it("rejects excluded senior roles even if the score is high", () => {
@@ -83,5 +83,19 @@ describe("scoreJob", () => {
 
     expect(result.matched).toBe(false);
     expect(result.rejectedReasons[0]).toContain("above your 3-year max");
+  });
+
+  it("rejects jobs without role keyword overlap", () => {
+    const result = scoreJob(
+      {
+        ...baseJob,
+        title: "Customer Success Associate",
+        description: "Remote role supporting enterprise customers.",
+      },
+      defaultPreferences,
+    );
+
+    expect(result.matched).toBe(false);
+    expect(result.rejectedReasons).toContain("No role keyword match");
   });
 });

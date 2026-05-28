@@ -5,6 +5,7 @@ import {
   getPreferences,
   hasDatabaseUrl,
   hasNotification,
+  recordPageMonitorStatus,
   recordNotification,
   saveMatchResult,
   updatePollRunProgress,
@@ -16,6 +17,11 @@ import { formatTelegramMessage, sendTelegramMessage } from "@/lib/telegram";
 import type { NormalizedJob, PollSummary } from "@/lib/types";
 
 const FRESH_POSTING_WINDOW_MS = 60 * 60 * 1000;
+const PAGE_MONITOR_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const POLL_DEADLINE_MS = 90_000;
+const SOURCE_DEADLINE_MS = 15_000;
+
+type PollTrigger = "manual" | "scheduled";
 
 function getFreshness(job: NormalizedJob, now = new Date()) {
   if (!job.postedAt) {
@@ -49,7 +55,25 @@ function getFreshness(job: NormalizedJob, now = new Date()) {
   };
 }
 
-export async function runPollingCycle() {
+function timeoutAfter<T>(promise: Promise<T>, ms: number, label: string) {
+  let timeout: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s.`)), ms);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
+}
+
+function shouldSkipScheduledPageMonitor(source: { provider: string; monitorLastCheckedAt?: string | null }) {
+  if (source.provider !== "page_monitor" || !source.monitorLastCheckedAt) return false;
+
+  const lastCheckedAt = new Date(source.monitorLastCheckedAt);
+  if (Number.isNaN(lastCheckedAt.getTime())) return false;
+
+  return Date.now() - lastCheckedAt.getTime() < PAGE_MONITOR_INTERVAL_MS;
+}
+
+export async function runPollingCycle(trigger: PollTrigger = "manual") {
   const summary: PollSummary = {
     checkedSources: 0,
     fetchedJobs: 0,
@@ -77,12 +101,24 @@ export async function runPollingCycle() {
   try {
     const preferences = await getPreferences();
     const sources = await getEnabledSources(preferences);
+    const startedAt = Date.now();
 
     for (const source of sources) {
+      if (Date.now() - startedAt > POLL_DEADLINE_MS) {
+        summary.errors.push("Poll stopped early to stay within runtime limits.");
+        break;
+      }
+
       summary.checkedSources += 1;
       summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
       summary.skippedSources.push(`Checking ${source.companyName}...`);
       await updatePollRunProgress(summary);
+
+      if (trigger === "scheduled" && shouldSkipScheduledPageMonitor(source)) {
+        summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
+        summary.skippedSources.push(`${source.companyName}: page monitor checked recently; skipping scheduled run.`);
+        continue;
+      }
 
       if (source.provider === "public_page") {
         summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
@@ -97,9 +133,9 @@ export async function runPollingCycle() {
       }
 
       try {
-        const jobs = await fetchJobsForSource(source);
+        const jobs = await timeoutAfter(fetchJobsForSource(source), SOURCE_DEADLINE_MS, source.companyName);
         summary.fetchedJobs += jobs.length;
-        const freshJobs = jobs.filter((job) => getFreshness(job).fresh);
+        const freshJobs = jobs.filter((job) => source.provider === "page_monitor" || getFreshness(job).fresh);
 
         if (freshJobs.length < jobs.length) {
           summary.skippedSources.push(`${source.companyName}: skipped ${jobs.length - freshJobs.length} older posting(s).`);
@@ -114,6 +150,13 @@ export async function runPollingCycle() {
           if (match.matched) summary.matchedJobs += 1;
 
           if (persisted.isNew && match.matched && !(await hasNotification(persisted.id))) {
+            const freshness = getFreshness(job);
+
+            if (!freshness.fresh) {
+              await recordNotification(persisted.id, "skipped", freshness.reason ?? "Skipped Telegram alert.");
+              continue;
+            }
+
             const message = formatTelegramMessage(job, match);
             const notification = await sendTelegramMessage(message);
             await recordNotification(persisted.id, notification.sent ? "sent" : "skipped", notification.reason);
@@ -121,11 +164,20 @@ export async function runPollingCycle() {
             if (notification.sent) summary.notifiedJobs += 1;
           }
         }
+        if (source.provider === "page_monitor") {
+          await recordPageMonitorStatus(source.companyId, jobs.length > 0 ? "success" : "no fresh jobs");
+        }
         summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         await updatePollRunProgress(summary);
       } catch (error) {
         summary.skippedSources = summary.skippedSources.filter((message) => !message.startsWith("Checking "));
         summary.errors.push(`${source.companyName}: ${error instanceof Error ? error.message : String(error)}`);
+        if (source.provider === "page_monitor") {
+          await recordPageMonitorStatus(
+            source.companyId,
+            error instanceof Error && error.message.toLowerCase().includes("timed out") ? "timed out" : "parsing failed",
+          );
+        }
         await updatePollRunProgress(summary);
       }
     }

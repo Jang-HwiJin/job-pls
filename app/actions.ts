@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { savePreferences } from "@/lib/db";
+import { savePreferences, setPageMonitorEnabled } from "@/lib/db";
 import { preferencesFromForm } from "@/lib/preferences";
 import { runPollingCycle } from "@/lib/poller";
 
@@ -51,4 +51,16 @@ export async function runPollAction(): Promise<ActionState> {
 
 export async function runPollActionWithState(): Promise<ActionState> {
   return runPollAction();
+}
+
+export async function togglePageMonitorAction(formData: FormData) {
+  const companyId = Number(formData.get("companyId"));
+  const enabled = formData.get("enabled") === "true";
+
+  if (!Number.isFinite(companyId) || companyId <= 0) {
+    throw new Error("Invalid page monitor company.");
+  }
+
+  await setPageMonitorEnabled(companyId, enabled);
+  revalidatePath("/");
 }

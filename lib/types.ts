@@ -5,6 +5,7 @@ export type Provider =
   | "smartrecruiters"
   | "usajobs"
   | "remotive"
+  | "page_monitor"
   | "public_page"
   | "unsupported";
 
@@ -23,6 +24,11 @@ export type CompanySeed = {
   status: ProviderStatus;
   homepage: string;
   sourceUrl?: string;
+  monitorStrategy?: string;
+  monitorEnabled?: boolean;
+  monitorNotes?: string;
+  monitorLastCheckedAt?: string | null;
+  monitorLastStatus?: string | null;
   notes?: string;
   priority: number;
   enabled: boolean;
@@ -33,6 +39,12 @@ export type JobSource = {
   companyName: string;
   provider: Provider;
   providerSlug: string;
+  sourceUrl?: string;
+  monitorStrategy?: string;
+  monitorEnabled?: boolean;
+  monitorNotes?: string;
+  monitorLastCheckedAt?: string | null;
+  monitorLastStatus?: string | null;
   status: ProviderStatus;
   enabled: boolean;
   priority: number;

@@ -44,26 +44,55 @@ function extractSalary(text: string) {
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-async function fetchJson(url: string, init?: RequestInit) {
+async function fetchWithTimeout(url: string, init?: RequestInit) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  const response = await fetch(url, {
+  return fetch(url, {
     ...init,
     signal: controller.signal,
     headers: {
       "User-Agent": "job-pls/0.1 (+https://github.com/Jang-HwiJin/job-pls)",
-      Accept: "application/json",
       ...init?.headers,
     },
     next: { revalidate: 0 },
   }).finally(() => clearTimeout(timeout));
+}
+
+async function fetchJson(url: string, init?: RequestInit) {
+  const response = await fetchWithTimeout(url, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...init?.headers,
+    },
+  });
 
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} from ${url}`);
   }
 
   return response.json() as Promise<unknown>;
+}
+
+async function fetchText(url: string, init?: RequestInit) {
+  const response = await fetchWithTimeout(url, {
+    ...init,
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      ...init?.headers,
+    },
+  });
+
+  if (response.status === 401 || response.status === 403 || response.status === 429) {
+    throw new Error(`blocked with ${response.status} ${response.statusText} from ${url}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText} from ${url}`);
+  }
+
+  return response.text();
 }
 
 function compactLocations(values: unknown[]) {
@@ -79,6 +108,10 @@ export async function fetchJobsForSource(source: JobSource): Promise<NormalizedJ
 
   if (source.provider === "public_page") {
     return [];
+  }
+
+  if (source.provider === "page_monitor") {
+    return fetchPageMonitorJobs(source);
   }
 
   if (source.provider === "usajobs") {
@@ -101,6 +134,73 @@ export async function fetchJobsForSource(source: JobSource): Promise<NormalizedJ
   if (!fetcher) return [];
 
   return fetcher(source);
+}
+
+function htmlDecode(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, " ");
+}
+
+function toAbsoluteUrl(href: string, baseUrl: string) {
+  try {
+    return new URL(href, baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractDateHint(text: string) {
+  const isoDate = text.match(/\b20\d{2}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z?)?\b/);
+  if (!isoDate) return undefined;
+
+  const date = new Date(isoDate[0]);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+async function fetchPageMonitorJobs(source: JobSource): Promise<NormalizedJob[]> {
+  if (!source.sourceUrl || !source.monitorStrategy) return [];
+
+  const html = await fetchText(source.sourceUrl);
+  const anchorMatches = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+  const seen = new Set<string>();
+  const jobs: NormalizedJob[] = [];
+
+  for (const match of anchorMatches) {
+    const href = htmlDecode(match[1] ?? "").trim();
+    const label = stripHtml(htmlDecode(match[2] ?? ""));
+    const applyUrl = toAbsoluteUrl(href, source.sourceUrl);
+    const normalized = `${label} ${applyUrl}`.toLowerCase();
+
+    if (!applyUrl || !label || seen.has(applyUrl)) continue;
+    if (!/(job|career|position|opening|role|software|engineer|developer)/.test(normalized)) continue;
+    if (label.length < 5 || label.length > 180) continue;
+
+    seen.add(applyUrl);
+    jobs.push({
+      provider: "page_monitor",
+      providerJobId: `${source.monitorStrategy}:${applyUrl}`,
+      companyName: source.companyName,
+      title: label,
+      description: "",
+      locations: [],
+      remoteType: detectRemoteType(label),
+      applyUrl,
+      sourceUrl: source.sourceUrl,
+      postedAt: extractDateHint(normalized),
+      raw: {
+        strategy: source.monitorStrategy,
+        sourceUrl: source.sourceUrl,
+      },
+    });
+
+    if (jobs.length >= 30) break;
+  }
+
+  return jobs;
 }
 
 async function fetchGreenhouse(source: JobSource): Promise<NormalizedJob[]> {

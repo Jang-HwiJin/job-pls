@@ -24,4 +24,14 @@ describe("normalizePreferences", () => {
     expect(preferences.matchThreshold).toBe(59);
     expect(preferences.companySlugs).toEqual(["openai"]);
   });
+
+  it("preserves an empty company list as any-company mode", () => {
+    const preferences = normalizePreferences(
+      JSON.stringify({
+        companySlugs: [],
+      }),
+    );
+
+    expect(preferences.companySlugs).toEqual([]);
+  });
 });

@@ -52,7 +52,7 @@ export function CompanyMultiselect({
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2 rounded-2xl border border-[#17130d]/10 bg-white/70 p-3 transition-all duration-300">
         {selectedCompanies.length === 0 ? (
-          <span className="text-sm text-[#76664e]">No companies selected. Pick at least one to poll for alerts.</span>
+          <span className="text-sm text-[#76664e]">No companies selected. Alerts can come from any enabled source.</span>
         ) : (
           selectedCompanies.map((company) => (
             <span

@@ -60,7 +60,7 @@ export function normalizePreferences(value: unknown): Preferences {
     maxYearsExperience: Number(preferences?.maxYearsExperience ?? defaultPreferences.maxYearsExperience),
     minSalary: Number(preferences?.minSalary ?? defaultPreferences.minSalary),
     matchThreshold: Number(preferences?.matchThreshold ?? defaultPreferences.matchThreshold),
-    companySlugs: Array.isArray(preferences?.companySlugs) && preferences.companySlugs.length > 0
+    companySlugs: Array.isArray(preferences?.companySlugs)
       ? preferences.companySlugs
       : defaultPreferences.companySlugs,
   };

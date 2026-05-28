@@ -123,6 +123,11 @@ export async function ensureDatabase() {
       status TEXT NOT NULL,
       homepage TEXT NOT NULL,
       source_url TEXT,
+      monitor_strategy TEXT,
+      monitor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      monitor_notes TEXT,
+      monitor_last_checked_at TIMESTAMPTZ,
+      monitor_last_status TEXT,
       notes TEXT,
       priority INTEGER NOT NULL DEFAULT 0,
       enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -168,6 +173,12 @@ export async function ensureDatabase() {
   `;
 
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS jobs_canonical_url_idx ON jobs (canonical_url)`;
+
+  await sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monitor_strategy TEXT`;
+  await sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monitor_enabled BOOLEAN NOT NULL DEFAULT FALSE`;
+  await sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monitor_notes TEXT`;
+  await sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monitor_last_checked_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monitor_last_status TEXT`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS match_results (
@@ -228,6 +239,9 @@ async function seedCatalog() {
         status,
         homepage,
         source_url,
+        monitor_strategy,
+        monitor_enabled,
+        monitor_notes,
         notes,
         priority,
         enabled
@@ -240,6 +254,9 @@ async function seedCatalog() {
         ${company.status},
         ${company.homepage},
         ${company.sourceUrl ?? null},
+        ${company.monitorStrategy ?? null},
+        ${company.monitorEnabled ?? false},
+        ${company.monitorNotes ?? null},
         ${company.notes ?? null},
         ${company.priority},
         ${company.enabled}
@@ -250,6 +267,8 @@ async function seedCatalog() {
         status = EXCLUDED.status,
         homepage = EXCLUDED.homepage,
         source_url = EXCLUDED.source_url,
+        monitor_strategy = EXCLUDED.monitor_strategy,
+        monitor_notes = EXCLUDED.monitor_notes,
         notes = EXCLUDED.notes,
         priority = EXCLUDED.priority
     `;
@@ -290,7 +309,21 @@ export async function getEnabledSources(preferences: Preferences): Promise<JobSo
   await ensureDatabase();
   const sql = getSql();
   const rows = rowsFrom(await sql`
-    SELECT id, name, slug, provider, provider_slug, status, enabled, priority
+    SELECT
+      id,
+      name,
+      slug,
+      provider,
+      provider_slug,
+      status,
+      enabled,
+      priority,
+      source_url,
+      monitor_strategy,
+      monitor_enabled,
+      monitor_notes,
+      monitor_last_checked_at,
+      monitor_last_status
     FROM companies
     WHERE enabled = TRUE
     ORDER BY priority DESC, name ASC
@@ -298,16 +331,51 @@ export async function getEnabledSources(preferences: Preferences): Promise<JobSo
   const companyFilter = new Set(preferences.companySlugs.map((slug) => slug.toLowerCase()));
 
   return rows
-    .filter((row) => companyFilter.has(String(row.slug).toLowerCase()))
+    .filter((row) => companyFilter.size === 0 || companyFilter.has(String(row.slug).toLowerCase()))
+    .filter((row) => row.provider !== "page_monitor" || Boolean(row.monitor_enabled))
     .map((row) => ({
       companyId: Number(row.id),
       companyName: String(row.name),
       provider: row.provider as Provider,
       providerSlug: String(row.provider_slug),
+      sourceUrl: row.source_url ? String(row.source_url) : undefined,
+      monitorStrategy: row.monitor_strategy ? String(row.monitor_strategy) : undefined,
+      monitorEnabled: Boolean(row.monitor_enabled),
+      monitorNotes: row.monitor_notes ? String(row.monitor_notes) : undefined,
+      monitorLastCheckedAt: toIsoDate(row.monitor_last_checked_at),
+      monitorLastStatus: row.monitor_last_status ? String(row.monitor_last_status) : null,
       status: row.status as ProviderStatus,
       enabled: Boolean(row.enabled),
       priority: Number(row.priority),
     }));
+}
+
+export async function setPageMonitorEnabled(companyId: number, enabled: boolean) {
+  await ensureDatabase();
+  const sql = getSql();
+
+  await sql`
+    UPDATE companies
+    SET
+      monitor_enabled = ${enabled},
+      enabled = TRUE,
+      updated_at = NOW()
+    WHERE id = ${companyId}
+      AND provider = 'page_monitor'
+  `;
+}
+
+export async function recordPageMonitorStatus(companyId: number, status: string) {
+  const sql = getSql();
+
+  await sql`
+    UPDATE companies
+    SET
+      monitor_last_checked_at = NOW(),
+      monitor_last_status = ${status},
+      updated_at = NOW()
+    WHERE id = ${companyId}
+  `;
 }
 
 export async function createPollRun() {
@@ -504,7 +572,22 @@ export async function getDashboardData(): Promise<DashboardData> {
   await ensureDatabase();
   const sql = getSql();
   const companies = rowsFrom(await sql`
-    SELECT id, name, slug, provider, status, homepage, source_url, notes, priority, enabled
+    SELECT
+      id,
+      name,
+      slug,
+      provider,
+      status,
+      homepage,
+      source_url,
+      monitor_strategy,
+      monitor_enabled,
+      monitor_notes,
+      monitor_last_checked_at,
+      monitor_last_status,
+      notes,
+      priority,
+      enabled
     FROM companies
     ORDER BY priority DESC, name ASC
   `);
@@ -528,6 +611,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     LEFT JOIN match_results ON match_results.job_id = jobs.id
     LEFT JOIN notification_history ON notification_history.job_id = jobs.id
     WHERE jobs.posted_at >= NOW() - INTERVAL '1 hour'
+      AND match_results.matched = TRUE
     ORDER BY jobs.first_seen_at DESC
     LIMIT 30
   `);
@@ -548,6 +632,11 @@ export async function getDashboardData(): Promise<DashboardData> {
       status: row.status as ProviderStatus,
       homepage: String(row.homepage),
       sourceUrl: row.source_url ? String(row.source_url) : undefined,
+      monitorStrategy: row.monitor_strategy ? String(row.monitor_strategy) : undefined,
+      monitorEnabled: Boolean(row.monitor_enabled),
+      monitorNotes: row.monitor_notes ? String(row.monitor_notes) : undefined,
+      monitorLastCheckedAt: toIsoDate(row.monitor_last_checked_at),
+      monitorLastStatus: row.monitor_last_status ? String(row.monitor_last_status) : undefined,
       notes: row.notes ? String(row.notes) : undefined,
       priority: Number(row.priority),
       enabled: Boolean(row.enabled),

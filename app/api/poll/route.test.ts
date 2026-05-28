@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { runPollingCycle } from "@/lib/poller";
+
 vi.mock("@/lib/poller", () => ({
   runPollingCycle: vi.fn(async () => ({
     checkedSources: 0,
@@ -39,5 +41,6 @@ describe("poll route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(runPollingCycle).toHaveBeenCalledWith("scheduled");
   });
 });

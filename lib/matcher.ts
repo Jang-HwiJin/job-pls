@@ -8,6 +8,10 @@ function countMatches(text: string, values: string[]) {
   return values.filter((value) => text.includes(value.toLowerCase())).length;
 }
 
+function normalizedKeywords(values: string[]) {
+  return values.map((value) => value.trim().toLowerCase()).filter(Boolean);
+}
+
 export function extractExperienceYears(text: string) {
   const normalized = text.toLowerCase();
   const ranges = [...normalized.matchAll(/\b(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\s*\+?\s*years?/g)].map(
@@ -50,6 +54,7 @@ export function scoreJob(job: NormalizedJob, preferences: Preferences): MatchRes
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+  const titleAndDepartment = [job.title, job.department].filter(Boolean).join(" ").toLowerCase();
 
   const rejectedReasons: string[] = [];
   const reasons: string[] = [];
@@ -86,11 +91,22 @@ export function scoreJob(job: NormalizedJob, preferences: Preferences): MatchRes
     }
   }
 
-  const keywordMatches = countMatches(haystack, preferences.roleKeywords);
+  const roleKeywords = normalizedKeywords(preferences.roleKeywords);
+  const keywordMatches = countMatches(haystack, roleKeywords);
+  const titleKeywordMatches = countMatches(titleAndDepartment, roleKeywords);
+
+  if (roleKeywords.length > 0 && keywordMatches === 0) {
+    rejectedReasons.push("No role keyword match");
+  }
+
   if (keywordMatches > 0) {
-    const points = Math.min(40, keywordMatches * 12);
+    const points = Math.min(55, keywordMatches * 10 + titleKeywordMatches * 18);
     score += points;
-    reasons.push(`${keywordMatches} role keyword match${keywordMatches === 1 ? "" : "es"}`);
+    reasons.push(
+      titleKeywordMatches > 0
+        ? `${titleKeywordMatches} title/department keyword match${titleKeywordMatches === 1 ? "" : "es"}`
+        : `${keywordMatches} role keyword match${keywordMatches === 1 ? "" : "es"}`,
+    );
   }
 
   if (includesAny(haystack, preferences.levels)) {
@@ -110,26 +126,26 @@ export function scoreJob(job: NormalizedJob, preferences: Preferences): MatchRes
   }
 
   if (job.remoteType === "remote") {
-    score += 15;
+    score += 8;
     reasons.push("Remote-friendly role");
   } else if (job.remoteType === "hybrid") {
-    score += 8;
+    score += 4;
     reasons.push("Hybrid role");
   }
 
   const locationText = job.locations.join(" ").toLowerCase();
   if (preferences.locations.length === 0 || includesAny(locationText, preferences.locations)) {
-    score += 12;
+    score += 6;
     reasons.push("Location preference looks compatible");
   }
 
   if (!job.maxSalary || job.maxSalary >= preferences.minSalary) {
-    score += 10;
+    score += 5;
     reasons.push(job.maxSalary ? "Salary clears minimum" : "No salary conflict found");
   }
 
   if (job.title.toLowerCase().includes("engineer")) {
-    score += 8;
+    score += 4;
     reasons.push("Engineering title");
   }
 
